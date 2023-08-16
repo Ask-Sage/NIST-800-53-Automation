@@ -16,3 +16,6 @@ build/
 .DS_STORE
 myenv/
 .env
+
+src/test*.py
+updated*.csv

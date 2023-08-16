@@ -1,16 +1,17 @@
 import pandas as pd
 import requests
+import time
 
 # Read the CSV file
 df = pd.read_csv('data/sp800-53r5-controls.csv')
 
 ## IF THE SCRIPT CRASHED, UPDATE THE CSV FILE SO IT USES the updated_sp800-53r5-controls.csv file
-#df = pd.read_csv('data/updated_sp800-53r5-controls.csv')
+#df = pd.read_csv('updated_sp800-53r5-controls.csv')
 
 # Function to get the access token
 ## You will find the API KEY and the URL after logging into the Ask Sage portal and clicking on your profile, then clicking "Manage API Keys"
 def get_access_token_with_api_key(username, api_key):
-    url = "https://CONTACTUS.asksage.ai/get-token-with-api-key"
+    url = "https://api.asksage.ai/user/get-token-with-api-key"
     data = {"email": username, "api_key": api_key}
     response = requests.post(url, json=data)
     if int(response.json()["status"]) != 200:
@@ -21,8 +22,8 @@ def get_access_token_with_api_key(username, api_key):
 
 # Function to query the Ask Sage Server Query API
 ## You will find the API KEY and the URL after logging into the Ask Sage portal and clicking on your profile, then clicking "Manage API Keys"
-def query_sage(token, prompt, temperature, dataset, model):
-    url = "https://CONTACTUS.asksage.ai/query"
+def query_sage(token, prompt, temperature, dataset, model, count=0):
+    url = "https://api.asksage.ai/server/query"
     headers = {"x-access-tokens": token}
     data = {
         "message": prompt,
@@ -33,7 +34,13 @@ def query_sage(token, prompt, temperature, dataset, model):
     response = requests.post(url, json=data, headers=headers)
     if int(response.json()["status"]) != 200:
         print(response.json())
-        raise Exception("Error getting GPT4 response")
+        if count >= 3:
+            raise Exception("Error querying Ask Sage Server")
+        
+        print('Sleeping for 20s')
+        time.sleep(20)
+        
+        return query_sage(token, prompt, temperature, dataset, model, count+1)
     return response.json()["message"]
 
 # Get the access token
@@ -88,3 +95,7 @@ NIST CONTROL:
 
         # Save the updated DataFrame to a new CSV file
         df.to_csv('updated_sp800-53r5-controls.csv', index=False)
+
+        # Do not remove or your API key might get banned
+        print('Sleeping for 30s')
+        time.sleep(30)
