@@ -2,28 +2,24 @@ import pandas as pd
 import requests
 import time
 
-# Read the CSV file
-df = pd.read_csv('data/sp800-53r5-controls.csv')
+# Constants
+GET_TOKEN_URL = "https://api.asksage.ai/user/get-token-with-api-key"
+QUERY_URL = "https://api.asksage.ai/server/query"
 
-## IF THE SCRIPT CRASHED, UPDATE THE CSV FILE SO IT USES the updated_sp800-53r5-controls.csv file
-#df = pd.read_csv('updated_sp800-53r5-controls.csv')
+# Read the CSV file
+controls_df = pd.read_csv('data/sp800-53r5-controls.csv')
 
 # Function to get the access token
-## You will find the API KEY and the URL after logging into the Ask Sage portal and clicking on your profile, then clicking "Manage API Keys"
-def get_access_token_with_api_key(username, api_key):
-    url = "https://api.asksage.ai/user/get-token-with-api-key"
+def get_access_token_with_api_key(username: str, api_key: str) -> str:
     data = {"email": username, "api_key": api_key}
-    response = requests.post(url, json=data)
-    if int(response.json()["status"]) != 200:
-        print(response.json())
-        raise Exception("Error getting access token")
-     
-    return response.json()["response"]["access_token"]
+    response = requests.post(GET_TOKEN_URL, json=data)
+    response_json = response.json()
+    if int(response_json["status"]) != 200:
+        raise Exception("Error getting access token: " + response_json["message"])
+    return response_json["response"]["access_token"]
 
 # Function to query the Ask Sage Server Query API
-## You will find the API KEY and the URL after logging into the Ask Sage portal and clicking on your profile, then clicking "Manage API Keys"
-def query_sage(token, prompt, temperature, dataset, model, count=0):
-    url = "https://api.asksage.ai/server/query"
+def query_sage(token: str, prompt: str, temperature: int, dataset: str, model: str, count: int = 0) -> str:
     headers = {"x-access-tokens": token}
     data = {
         "message": prompt,
@@ -31,27 +27,22 @@ def query_sage(token, prompt, temperature, dataset, model, count=0):
         "dataset": dataset,
         "model": model
     }
-    response = requests.post(url, json=data, headers=headers)
-    if int(response.json()["status"]) != 200:
-        print(response.json())
+    response = requests.post(QUERY_URL, json=data, headers=headers)
+    response_json = response.json()
+    if int(response_json["status"]) != 200:
         if count >= 3:
-            raise Exception("Error querying Ask Sage Server")
-        
+            raise Exception("Error querying Ask Sage Server: " + response_json["message"])
         print('Sleeping for 20s')
         time.sleep(20)
-        
         return query_sage(token, prompt, temperature, dataset, model, count+1)
-    return response.json()["message"]
+    return response_json["message"]
 
 # Get the access token
-
-## UPDATE THIS INFORMATION, ACCOUNT REQUIRES A PAID ASK SAGE ACCOUNT. This will cost probably $300 dollars of tokens so ensure you reach out to sales@asksage.ai to get the tokens purchased.
 username = 'EMAIL HERE'
 api_key = 'API KEY HERE'
-
 access_token = get_access_token_with_api_key(username, api_key)
 
-## UPDATE THESE AS NECESSARY
+# Update the prompt template
 introduction_context = """I am Nic Chaillan the CEO of Ask Sage.
 We are creating the implementation details for each of the NIST 800-53 controls based on our cybersecurity posture context for our Ask Sage application.
 """
@@ -68,13 +59,13 @@ Ask Sage is hosted on Azure Government at IL5. It runs on Kubernetes using AKS. 
 Ask Sage is a very lean team and only one person has access to administrative access at this time alongside our Microsoft selected partners. 
 """
 
-action = """Without introductary phrases, write the Ask Sage implementation details for this control with relevant information for our auditor and fill the blank values:
+action = """Without introductory phrases, write the Ask Sage implementation details for this control with relevant information for our auditor and fill the blank values:
 """
 
 # Iterate through the DataFrame and update the Implementation column
-for index, row in df.iterrows():
+for index, row in controls_df.iterrows():
     combined_nist = format(row['Combined'])
-    prompt_template = """{introduction_context}
+    prompt_template = f"""{introduction_context}
 SECURITY CONTEXT ABOUT OUR PRODUCT:
 {security_context}
 END OF SECURITY CONTEXT.
@@ -88,13 +79,13 @@ NIST CONTROL:
 
     if pd.isna(row['Implementation']):
         response = query_sage(access_token, prompt, 0, "all", "gpt4")
-        df.at[index, 'Implementation'] = response
-    
+        controls_df.at[index, 'Implementation'] = response
+
         print(row['Control Identifier'])
         print(response)
 
         # Save the updated DataFrame to a new CSV file
-        df.to_csv('updated_sp800-53r5-controls.csv', index=False)
+        controls_df.to_csv('updated_sp800-53r5-controls.csv', index=False)
 
         # Do not remove or your API key might get banned
         print('Sleeping for 30s')
