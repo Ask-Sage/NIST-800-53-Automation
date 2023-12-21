@@ -1,37 +1,41 @@
+# Import necessary libraries
 import pandas as pd
 import requests
 import time
+import os
+from pathlib import Path
 
-# Read the CSV file
-df = pd.read_csv('data/sp800-53r5-controls.csv')
-
-## IF THE SCRIPT CRASHED, UPDATE THE CSV FILE SO IT USES the updated_sp800-53r5-controls.csv file
-#df = pd.read_csv('updated_sp800-53r5-controls.csv')
-
-# Function to get the access token
-## You will find the API KEY and the URL after logging into the Ask Sage portal and clicking on your profile, then clicking "Manage API Keys"
+# Function to get the access token from Ask Sage API
 def get_access_token_with_api_key(username, api_key):
+    # Define the URL for the get-token endpoint
     url = "https://api.asksage.ai/user/get-token-with-api-key"
+    # Prepare the data to be sent in the request
     data = {"email": username, "api_key": api_key}
+    # Send a POST request to the URL with the data
     response = requests.post(url, json=data)
+    # If the response status is not 200, print the response and raise an exception
     if int(response.json()["status"]) != 200:
         print(response.json())
         raise Exception("Error getting access token")
-     
+    # Return the access token from the response
     return response.json()["response"]["access_token"]
 
 # Function to query the Ask Sage Server Query API
-## You will find the API KEY and the URL after logging into the Ask Sage portal and clicking on your profile, then clicking "Manage API Keys"
 def query_sage(token, prompt, temperature, dataset, model, count=0):
+    # Define the URL for the query endpoint
     url = "https://api.asksage.ai/server/query"
+    # Prepare the headers for the request
     headers = {"x-access-tokens": token}
+    # Prepare the data to be sent in the request
     data = {
         "message": prompt,
         "temperature": temperature,
         "dataset": dataset,
         "model": model
     }
+    # Send a POST request to the URL with the data and headers
     response = requests.post(url, json=data, headers=headers)
+    # If the response status is not 200, print the response and retry up to 3 times with a 20s delay between each attempt
     if int(response.json()["status"]) != 200:
         print(response.json())
         if count >= 3:
@@ -41,61 +45,82 @@ def query_sage(token, prompt, temperature, dataset, model, count=0):
         time.sleep(20)
         
         return query_sage(token, prompt, temperature, dataset, model, count+1)
+    # Return the message from the response
     return response.json()["message"]
 
-# Get the access token
+# Function to fill in a CSV file with NIST controls using the Ask Sage API
+def fill_in_nist_csv(csv_path, username, api_key, introduction_context, security_context, action):
+    # Get the access token
+    access_token = get_access_token_with_api_key(username, api_key)
 
-## UPDATE THIS INFORMATION, ACCOUNT REQUIRES A PAID ASK SAGE ACCOUNT. This will cost probably $300 dollars of tokens so ensure you reach out to sales@asksage.ai to get the tokens purchased.
-username = 'EMAIL HERE'
-api_key = 'API KEY HERE'
+    # Check if the application is already in progress
+    file_path = "in_progress.file"
+    if os.path.exists(file_path):
+        csv_file_path = 'updated_' + csv_path
+    else:
+        csv_file_path = 'data/' + csv_path
+        # Create a file to indicate that the application is in progress
+        with open('in_progress.file', 'w') as f:
+            f.write('app is in progress')
 
-access_token = get_access_token_with_api_key(username, api_key)
-
-## UPDATE THESE AS NECESSARY
-introduction_context = """I am Nic Chaillan the CEO of Ask Sage.
-We are creating the implementation details for each of the NIST 800-53 controls based on our cybersecurity posture context for our Ask Sage application.
-"""
-
-security_context = """WRITE YOUR SECURITY CONTEXT HERE. RECOMMEND YOU FILL NIST 800 171 BY HAND AND COPY THE IMPLEMENTATION DETAILS HERE. 
-THIS IS WHAT WE DID FOR ASK SAGE.
-EXAMPLE (SMALL CUT FROM REAL THING):We are hosted on Azure Government and our backups are stored in the Azure Backup vault on a daily basis for all our resources and hourly basis for SQL backups.
-Our vector database which hosts our CUI customer data is backup every day.
-We have Bicep automation to spin up an entire Ask Sage enclave or replica within a couple of hours on any Azure Gov region.
-Our Azure OpenAI APIs runs on dedicated enclaves on Azure commercial FedRAMP high regions with two redundant APIs on East Coast and Central US.
-For end users, Ask Sage allows username/pw but this does NOT enable access to CUI. Only CAC authenticated users get access to datasets with CUI with MANUAL assignment from our team after verification of their eligibility. For cloud administrative access on our side, Ask Sage leverages MFA with Azure MFA one time password options. For Ask Sage administrative access Ask Sage leverage either CAC or MFA one time password options.
-Ask Sage has a full RBAC stack for all our cloud security/services but Ask Sage also brings a full Label Based Access Control to assign datasets to users based on need to know with MANUAL verification of CUI need to know by our team.
-Ask Sage is hosted on Azure Government at IL5. It runs on Kubernetes using AKS. CUI information is stored in our vector database in a container inside of AKS on Azure Government at IL5. The datasets are labels and datasets that has CUI data are labeled with "CUI" in the name. Those CANNOT be accessed without CAC authentication and are MANUALLY assigned by our administrators to users based on need to know. When Ask Sage end users ingest data, they are NOT allowed Saged to create a dataset with CUI in it UNLESS they authenticated with a CAC. Our Web Application Firewall prevents all access from foreign nations and only whitelisted NATO countries can access Ask Sage. Only users with CAC can access CUI.
-Ask Sage is a very lean team and only one person has access to administrative access at this time alongside our Microsoft selected partners. 
-"""
-
-action = """Without introductary phrases, write the Ask Sage implementation details for this control with relevant information for our auditor and fill the blank values:
-"""
-
-# Iterate through the DataFrame and update the Implementation column
-for index, row in df.iterrows():
-    combined_nist = format(row['Combined'])
-    prompt_template = """{introduction_context}
-SECURITY CONTEXT ABOUT OUR PRODUCT:
-{security_context}
-END OF SECURITY CONTEXT.
-
-NIST CONTROL:
-{combined_nist}
-
-{action}"""
-
-    prompt = prompt_template.format(introduction_context=introduction_context, security_context=security_context, combined_nist=combined_nist, action=action)
-
-    if pd.isna(row['Implementation']):
-        response = query_sage(access_token, prompt, 0, "all", "gpt4")
-        df.at[index, 'Implementation'] = response
+    # Read the CSV file into a DataFrame
+    df = pd.read_csv(csv_file_path)
     
-        print(row['Control Identifier'])
-        print(response)
+    # Iterate through the DataFrame and update the Implementation column
+    for index, row in df.iterrows():
+        # Format the Combined column
+        combined_nist = format(row['Combined'])
+        # Prepare the prompt for the Ask Sage API
+        prompt_template = """{introduction_context}
+    SECURITY CONTEXT ABOUT OUR PRODUCT:
+    {security_context}
+    END OF SECURITY CONTEXT.
 
-        # Save the updated DataFrame to a new CSV file
-        df.to_csv('updated_sp800-53r5-controls.csv', index=False)
+    NIST CONTROL:
+    {combined_nist}
 
-        # Do not remove or your API key might get banned
-        print('Sleeping for 30s')
-        time.sleep(30)
+    {action}"""
+
+        prompt = prompt_template.format(introduction_context=introduction_context, security_context=security_context, combined_nist=combined_nist, action=action)
+
+        # If the Implementation column is empty, query the Ask Sage API and update the column with the response
+        if pd.isna(row['Implementation']):
+            response = query_sage(access_token, prompt, 0, "all", "gpt4")
+            df.at[index, 'Implementation'] = response
+        
+            print(row['Control Identifier'])
+            print(response)
+
+            # Save the updated DataFrame to a new CSV file
+            df.to_csv('updated_' + csv_path, index=False)
+
+            # Sleep for 30s to avoid overloading the API
+            print('Sleeping for 30s')
+            time.sleep(30)
+    
+    # Remove the in progress file
+    os.remove(file_path)
+    
+    print('COMPLETE!')
+
+# Main function
+if __name__ == "__main__":
+    # Get the path to the CSV file from the environment variables or use a default value
+    base_csv_path = os.environ.get('CSV_PATH', 'sp800-53r5-controls.csv')
+
+    # Get the username and API key from the environment variables or use default values
+    username = os.environ.get('ASKSAGE_USERNAME', 'PUT_USERNAME_HERE_IF_NOT_USING_ENVIRONMENT_VARIABLES')
+    api_key = os.environ.get('ASKSAGE_API_KEY', 'PUT_API_KEY_HERE_IF_NOT_USING_ENVIRONMENT_VARIABLES')
+
+    # Get the paths to the context files from the environment variables or use default values
+    introduction_context_file = os.environ.get('INTRODUCTION_CONTEXT_FILE', 'data/introduction_context.txt')
+    security_context_file = os.environ.get('SECURITY_CONTEXT_FILE', 'data/security_context.txt')
+    action_file = os.environ.get('ACTION_FILE', 'data/action.txt')
+
+    # Read the context files
+    introduction_context = Path(introduction_context_file).read_text()
+    security_context = Path(security_context_file).read_text()
+    action = Path(action_file).read_text()
+
+    # Call the function to fill in the CSV file
+    fill_in_nist_csv(base_csv_path, username, api_key, introduction_context, security_context, action)

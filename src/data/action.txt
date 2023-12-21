@@ -1,0 +1,1 @@
+Without introductary phrases, write the Ask Sage implementation details for this control with relevant information for our auditor and fill the blank values:
