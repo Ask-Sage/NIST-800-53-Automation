@@ -1,0 +1,2 @@
+I am Nic Chaillan the CEO of Ask Sage.
+We are creating the implementation details for each of the NIST 800-53 controls based on our cybersecurity posture context for our Ask Sage application.
